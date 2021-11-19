@@ -13,16 +13,12 @@ import (
 
 const (
 	defaultDirOpenBufferSize = 100
-	defaultListBufferSize    = 1000
 )
 
 // GCSFS represents a filesystem on GCS (Google Cloud Storage).
 type GCSFS struct {
 	// DirOpenBufferSize is the buffer size for using objects as the directory. (Default 100)
 	DirOpenBufferSize int
-	// ListBufferSize is the buffer size for listing objects that is used on
-	// ReadDir, Glob and RemoveAll. (Default 1000)
-	ListBufferSize int
 	bucket         string
 	dir            string
 	ctx            context.Context
@@ -56,7 +52,6 @@ func New(bucket string) *GCSFS {
 func NewWithClient(bucket string, client *storage.Client) *GCSFS {
 	return &GCSFS{
 		DirOpenBufferSize: defaultDirOpenBufferSize,
-		ListBufferSize:    defaultListBufferSize,
 		bucket:            bucket,
 		client:            client,
 	}
