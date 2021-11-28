@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"github.com/jarxorg/fs2"
 	"google.golang.org/api/iterator"
 )
 
@@ -19,10 +20,10 @@ const (
 type GCSFS struct {
 	// DirOpenBufferSize is the buffer size for using objects as the directory. (Default 100)
 	DirOpenBufferSize int
-	bucket         string
-	dir            string
-	ctx            context.Context
-	client         *storage.Client
+	bucket            string
+	dir               string
+	ctx               context.Context
+	client            *storage.Client
 }
 
 var (
@@ -227,4 +228,89 @@ func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// MkdirAll always do nothing.
+func (fsys *GCSFS) MkdirAll(dir string, mode fs.FileMode) error {
+	return nil
+}
+
+func (fsys *GCSFS) createFile(name string) (*gcsWriterFile, error) {
+	if !fs.ValidPath(name) {
+		return nil, toPathError(fs.ErrInvalid, "Create", name)
+	}
+	client, err := fsys.Client()
+	if err != nil {
+		return nil, toPathError(err, "Create", name)
+	}
+	obj := client.Bucket(fsys.bucket).Object(fsys.key(name))
+	return newGcsWriterFile(fsys, obj, name), nil
+}
+
+// CreateFile creates the named file.
+// The specified mode is ignored.
+func (fsys *GCSFS) CreateFile(name string, mode fs.FileMode) (fs2.WriterFile, error) {
+	return fsys.createFile(name)
+}
+
+// WriteFile writes the specified bytes to the named file.
+// The specified mode is ignored.
+func (fsys *GCSFS) WriteFile(name string, p []byte, mode fs.FileMode) (int, error) {
+	f, err := fsys.createFile(name)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	n, err := f.Write(p)
+	if err != nil {
+		return 0, toPathError(err, "WriteFile", name)
+	}
+	return n, nil
+}
+
+// RemoveFile removes the specified named file.
+func (fsys *GCSFS) RemoveFile(name string) error {
+	if !fs.ValidPath(name) {
+		return toPathError(fs.ErrInvalid, "RemoveFile", name)
+	}
+	client, err := fsys.Client()
+	if err != nil {
+		return toPathError(err, "RemoveFile", name)
+	}
+	obj := client.Bucket(fsys.bucket).Object(fsys.key(name))
+
+	return toPathError(obj.Delete(fsys.Context()), "RemoveFile", name)
+}
+
+// RemoveAll removes path and any children it contains.
+func (fsys *GCSFS) RemoveAll(dir string) error {
+	if !fs.ValidPath(dir) {
+		return toPathError(fs.ErrInvalid, "RemoveAll", dir)
+	}
+	client, err := fsys.Client()
+	if err != nil {
+		return toPathError(err, "RemoveAll", dir)
+	}
+
+	ctx := fsys.Context()
+	query := &storage.Query{
+		Prefix: normalizePrefix(fsys.key(dir)),
+	}
+	it := client.Bucket(fsys.bucket).Objects(fsys.Context(), query)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return toPathError(err, "RemoveAll", dir)
+		}
+		name := path.Join(attrs.Prefix, attrs.Name)
+		obj := client.Bucket(fsys.bucket).Object(name)
+		if err := obj.Delete(ctx); err != nil {
+			return toPathError(err, "RemoveAll", name)
+		}
+	}
+	return nil
 }

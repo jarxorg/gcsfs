@@ -2,8 +2,10 @@ package gcsfs
 
 import (
 	"io/fs"
+	"path"
 
 	"cloud.google.com/go/storage"
+	"github.com/jarxorg/fs2"
 )
 
 type gcsFile struct {
@@ -34,7 +36,7 @@ func (f *gcsFile) Read(p []byte) (int, error) {
 		var err error
 		f.in, err = f.obj.NewReader(f.fsys.Context())
 		if err != nil {
-			return 0, err
+			return 0, toPathError(err, "Read", f.attrs.Name)
 		}
 	}
 	return f.in.Read(p)
@@ -53,4 +55,51 @@ func (f *gcsFile) Close() error {
 		f.in = nil
 	}
 	return err
+}
+
+type gcsWriterFile struct {
+	*content
+	fsys *GCSFS
+	name string
+	obj  *storage.ObjectHandle
+	out  *storage.Writer
+}
+
+var (
+	_ fs2.WriterFile = (*gcsWriterFile)(nil)
+	_ fs.FileInfo    = (*gcsWriterFile)(nil)
+)
+
+func newGcsWriterFile(fsys *GCSFS, obj *storage.ObjectHandle, name string) *gcsWriterFile {
+	return &gcsWriterFile{
+		content: &content{
+			name: path.Base(name),
+		},
+		fsys: fsys,
+		obj:  obj,
+		name: name,
+	}
+}
+
+// Write writes the specified bytes to this file.
+func (f *gcsWriterFile) Write(p []byte) (int, error) {
+	if f.out == nil {
+		f.out = f.obj.NewWriter(f.fsys.Context())
+	}
+	return f.out.Write(p)
+}
+
+// Close closes streams.
+func (f *gcsWriterFile) Close() error {
+	return nil
+}
+
+// Read reads bytes from this file.
+func (f *gcsWriterFile) Read(p []byte) (int, error) {
+	return 0, nil
+}
+
+// Stat returns the fs.FileInfo of this file.
+func (f *gcsWriterFile) Stat() (fs.FileInfo, error) {
+	return f, nil
 }
