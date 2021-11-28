@@ -22,6 +22,9 @@ func isObjectNotFound(err error) bool {
 }
 
 func toPathError(err error, op, name string) error {
+	if err == nil {
+		return nil
+	}
 	if isObjectNotFound(err) {
 		err = fs.ErrNotExist
 	}
