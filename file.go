@@ -5,7 +5,7 @@ import (
 	"path"
 
 	"cloud.google.com/go/storage"
-	"github.com/jarxorg/fs2"
+	"github.com/jarxorg/wfs"
 )
 
 type gcsFile struct {
@@ -66,7 +66,7 @@ type gcsWriterFile struct {
 }
 
 var (
-	_ fs2.WriterFile = (*gcsWriterFile)(nil)
+	_ wfs.WriterFile = (*gcsWriterFile)(nil)
 	_ fs.FileInfo    = (*gcsWriterFile)(nil)
 )
 

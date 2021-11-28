@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
-	"github.com/jarxorg/fs2"
+	"github.com/jarxorg/wfs"
 	"google.golang.org/api/iterator"
 )
 
@@ -249,7 +249,7 @@ func (fsys *GCSFS) createFile(name string) (*gcsWriterFile, error) {
 
 // CreateFile creates the named file.
 // The specified mode is ignored.
-func (fsys *GCSFS) CreateFile(name string, mode fs.FileMode) (fs2.WriterFile, error) {
+func (fsys *GCSFS) CreateFile(name string, mode fs.FileMode) (wfs.WriterFile, error) {
 	return fsys.createFile(name)
 }
 
