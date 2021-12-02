@@ -1,6 +1,7 @@
 package gcsfs
 
 import (
+	"io"
 	"io/fs"
 	"path"
 
@@ -11,9 +12,9 @@ import (
 type gcsFile struct {
 	*content
 	fsys  *GCSFS
-	obj   *storage.ObjectHandle
+	obj   object
 	attrs *storage.ObjectAttrs
-	in    *storage.Reader
+	in    io.ReadCloser
 }
 
 var (
@@ -21,7 +22,7 @@ var (
 	_ fs.FileInfo = (*gcsFile)(nil)
 )
 
-func newGcsFile(fsys *GCSFS, obj *storage.ObjectHandle, attrs *storage.ObjectAttrs) *gcsFile {
+func newGcsFile(fsys *GCSFS, obj object, attrs *storage.ObjectAttrs) *gcsFile {
 	return &gcsFile{
 		content: newFileContent(attrs),
 		fsys:    fsys,
@@ -34,7 +35,7 @@ func newGcsFile(fsys *GCSFS, obj *storage.ObjectHandle, attrs *storage.ObjectAtt
 func (f *gcsFile) Read(p []byte) (int, error) {
 	if f.in == nil {
 		var err error
-		f.in, err = f.obj.NewReader(f.fsys.Context())
+		f.in, err = f.obj.newReader(f.fsys.Context())
 		if err != nil {
 			return 0, toPathError(err, "Read", f.attrs.Name)
 		}
@@ -61,8 +62,8 @@ type gcsWriterFile struct {
 	*content
 	fsys *GCSFS
 	name string
-	obj  *storage.ObjectHandle
-	out  *storage.Writer
+	obj  object
+	out  io.WriteCloser
 }
 
 var (
@@ -70,7 +71,7 @@ var (
 	_ fs.FileInfo    = (*gcsWriterFile)(nil)
 )
 
-func newGcsWriterFile(fsys *GCSFS, obj *storage.ObjectHandle, name string) *gcsWriterFile {
+func newGcsWriterFile(fsys *GCSFS, obj object, name string) *gcsWriterFile {
 	return &gcsWriterFile{
 		content: &content{
 			name: path.Base(name),
@@ -84,13 +85,18 @@ func newGcsWriterFile(fsys *GCSFS, obj *storage.ObjectHandle, name string) *gcsW
 // Write writes the specified bytes to this file.
 func (f *gcsWriterFile) Write(p []byte) (int, error) {
 	if f.out == nil {
-		f.out = f.obj.NewWriter(f.fsys.Context())
+		f.out = f.obj.newWriter(f.fsys.Context())
 	}
 	return f.out.Write(p)
 }
 
 // Close closes streams.
 func (f *gcsWriterFile) Close() error {
+	if f.out != nil {
+		err := f.out.Close()
+		f.out = nil
+		return err
+	}
 	return nil
 }
 

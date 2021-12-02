@@ -10,14 +10,14 @@ import (
 )
 
 func isNotExist(err error) bool {
-	if err == fs.ErrNotExist {
+	if errors.Is(err, fs.ErrNotExist) {
 		return true
 	}
 	var pathErr *fs.PathError
 	return errors.As(err, &pathErr) && pathErr.Err == fs.ErrNotExist
 }
 
-func isObjectNotFound(err error) bool {
+func isObjectNotExist(err error) bool {
 	return errors.Is(err, storage.ErrObjectNotExist)
 }
 
@@ -25,10 +25,20 @@ func toPathError(err error, op, name string) error {
 	if err == nil {
 		return nil
 	}
-	if isObjectNotFound(err) {
+	if isObjectNotExist(err) {
 		err = fs.ErrNotExist
 	}
 	return &fs.PathError{Op: op, Path: name, Err: err}
+}
+
+func toObjectNotExistIfNoExist(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isNotExist(err) {
+		return storage.ErrObjectNotExist
+	}
+	return err
 }
 
 func normalizePrefix(prefix string) string {
@@ -40,4 +50,14 @@ func normalizePrefix(prefix string) string {
 		prefix = prefix + "/"
 	}
 	return prefix
+}
+
+func newQuery(delim, prefix, offset string) *storage.Query {
+	query := &storage.Query{
+		Delimiter:   delim,
+		Prefix:      prefix,
+		StartOffset: offset,
+	}
+	query.SetAttrSelection([]string{"Prefix", "Name", "Size", "Updated"})
+	return query
 }

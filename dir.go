@@ -6,7 +6,6 @@ import (
 	"sort"
 	"syscall"
 
-	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
 
@@ -94,18 +93,14 @@ func (d *gcsDir) list(n int) ([]fs.DirEntry, error) {
 		return nil, io.EOF
 	}
 
-	client, err := d.fsys.Client()
+	cl, err := d.fsys.client()
 	if err != nil {
 		return nil, err
 	}
-	query := &storage.Query{
-		Delimiter:   "/",
-		Prefix:      d.prefix,
-		StartOffset: d.offset,
-	}
-	it := client.Bucket(d.fsys.bucket).Objects(d.fsys.Context(), query)
+	query := newQuery("/", d.prefix, d.offset)
+	it := cl.bucket(d.fsys.bucket).objects(d.fsys.Context(), query)
 	for {
-		attrs, err := it.Next()
+		attrs, err := it.nextAttrs()
 		if err == iterator.Done {
 			d.eof = true
 			break

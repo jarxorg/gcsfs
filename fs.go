@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"path"
 	"strings"
+	"syscall"
 
 	"cloud.google.com/go/storage"
 	"github.com/jarxorg/wfs"
@@ -23,7 +24,7 @@ type GCSFS struct {
 	bucket            string
 	dir               string
 	ctx               context.Context
-	client            *storage.Client
+	cl                client
 }
 
 var (
@@ -54,13 +55,13 @@ func NewWithClient(bucket string, client *storage.Client) *GCSFS {
 	return &GCSFS{
 		DirOpenBufferSize: defaultDirOpenBufferSize,
 		bucket:            bucket,
-		client:            client,
+		cl:                &gcsClient{cl: client},
 	}
 }
 
 // WithClient holds the specified client. The specified client is closed by Close.
 func (fsys *GCSFS) WithClient(client *storage.Client) *GCSFS {
-	fsys.client = client
+	fsys.cl = &gcsClient{cl: client}
 	return fsys
 }
 
@@ -72,11 +73,11 @@ func (fsys *GCSFS) WithContext(ctx context.Context) *GCSFS {
 
 // Close closes holded storage client.
 func (fsys *GCSFS) Close() error {
-	if fsys.client == nil {
+	if fsys.cl == nil {
 		return nil
 	}
-	err := fsys.client.Close()
-	fsys.client = nil
+	err := fsys.cl.close()
+	fsys.cl = nil
 	return err
 }
 
@@ -89,17 +90,15 @@ func (fsys *GCSFS) Context() context.Context {
 	return fsys.ctx
 }
 
-// Client returns a holded storage client. If this filesystem has no client then
-// storage.NewClient(fsys.Context()) will call.
-func (fsys *GCSFS) Client() (*storage.Client, error) {
-	if fsys.client == nil {
-		var err error
-		fsys.client, err = storage.NewClient(fsys.Context())
+func (fsys *GCSFS) client() (client, error) {
+	if fsys.cl == nil {
+		client, err := storage.NewClient(fsys.Context())
 		if err != nil {
 			return nil, err
 		}
+		fsys.cl = &gcsClient{cl: client}
 	}
-	return fsys.client, nil
+	return fsys.cl, nil
 }
 
 func (fsys *GCSFS) key(name string) string {
@@ -114,15 +113,17 @@ func (fsys *GCSFS) openFile(name string) (*gcsFile, error) {
 	if !fs.ValidPath(name) {
 		return nil, toPathError(fs.ErrInvalid, "Open", name)
 	}
-	client, err := fsys.Client()
+	cl, err := fsys.client()
 	if err != nil {
 		return nil, toPathError(err, "Open", name)
 	}
-	obj := client.Bucket(fsys.bucket).Object(fsys.key(name))
-	attrs, err := obj.Attrs(fsys.ctx)
+
+	obj := cl.bucket(fsys.bucket).object(fsys.key(name))
+	attrs, err := obj.attrs(fsys.ctx)
 	if err != nil {
 		return nil, toPathError(err, "Open", name)
 	}
+
 	if attrs.Name == "" && attrs.Prefix == "" {
 		return nil, toPathError(storage.ErrObjectNotExist, "Open", name)
 	}
@@ -174,22 +175,29 @@ func (fsys *GCSFS) Sub(dir string) (fs.FS, error) {
 	if !fs.ValidPath(dir) {
 		return nil, toPathError(fs.ErrInvalid, "Sub", dir)
 	}
-	subFsys := NewWithClient(fsys.bucket, fsys.client).WithContext(fsys.Context())
-	subFsys.dir = path.Join(fsys.dir, dir)
-	return subFsys, nil
+	cl, err := fsys.client()
+	if err != nil {
+		return nil, err
+	}
+
+	return &GCSFS{
+		bucket: fsys.bucket,
+		cl:     cl,
+		ctx:    fsys.Context(),
+		dir:    path.Join(fsys.dir, dir),
+	}, nil
 }
 
 // Glob returns the names of all files matching pattern, providing an implementation
 // of the top-level Glob function.
 func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
-	client, err := fsys.Client()
+	cl, err := fsys.client()
 	if err != nil {
 		return nil, err
 	}
-	query := &storage.Query{
-		Prefix: normalizePrefix(fsys.dir),
-	}
-	it := client.Bucket(fsys.bucket).Objects(fsys.Context(), query)
+
+	query := newQuery(normalizePrefix(fsys.dir), "", "")
+	it := cl.bucket(fsys.bucket).objects(fsys.Context(), query)
 
 	var names []string
 	matchAppend := func(name string) error {
@@ -205,7 +213,7 @@ func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
 
 	lastDir := ""
 	for {
-		attrs, err := it.Next()
+		attrs, err := it.nextAttrs()
 		if err == iterator.Done {
 			break
 		}
@@ -239,11 +247,25 @@ func (fsys *GCSFS) createFile(name string) (*gcsWriterFile, error) {
 	if !fs.ValidPath(name) {
 		return nil, toPathError(fs.ErrInvalid, "Create", name)
 	}
-	client, err := fsys.Client()
+	cl, err := fsys.client()
 	if err != nil {
 		return nil, toPathError(err, "Create", name)
 	}
-	obj := client.Bucket(fsys.bucket).Object(fsys.key(name))
+
+	if _, err := fsys.openFile(name); err != nil {
+		if !isNotExist(err) {
+			return nil, toPathError(err, "CreateFile", name)
+		}
+		if _, err := newGcsDir(fsys, name).open(1); err == nil {
+			return nil, toPathError(syscall.EISDIR, "CreateFile", name)
+		}
+	}
+	dir := path.Dir(name)
+	if _, err := fsys.openFile(dir); err == nil {
+		return nil, toPathError(syscall.ENOTDIR, "CreateFile", dir)
+	}
+
+	obj := cl.bucket(fsys.bucket).object(fsys.key(name))
 	return newGcsWriterFile(fsys, obj, name), nil
 }
 
@@ -274,13 +296,13 @@ func (fsys *GCSFS) RemoveFile(name string) error {
 	if !fs.ValidPath(name) {
 		return toPathError(fs.ErrInvalid, "RemoveFile", name)
 	}
-	client, err := fsys.Client()
+	cl, err := fsys.client()
 	if err != nil {
 		return toPathError(err, "RemoveFile", name)
 	}
-	obj := client.Bucket(fsys.bucket).Object(fsys.key(name))
 
-	return toPathError(obj.Delete(fsys.Context()), "RemoveFile", name)
+	obj := cl.bucket(fsys.bucket).object(fsys.key(name))
+	return toPathError(obj.delete(fsys.Context()), "RemoveFile", name)
 }
 
 // RemoveAll removes path and any children it contains.
@@ -288,18 +310,17 @@ func (fsys *GCSFS) RemoveAll(dir string) error {
 	if !fs.ValidPath(dir) {
 		return toPathError(fs.ErrInvalid, "RemoveAll", dir)
 	}
-	client, err := fsys.Client()
+	cl, err := fsys.client()
 	if err != nil {
 		return toPathError(err, "RemoveAll", dir)
 	}
 
+	bkt := cl.bucket(fsys.bucket)
 	ctx := fsys.Context()
-	query := &storage.Query{
-		Prefix: normalizePrefix(fsys.key(dir)),
-	}
-	it := client.Bucket(fsys.bucket).Objects(fsys.Context(), query)
+	query := newQuery(normalizePrefix(fsys.key(dir)), "", "")
+	it := bkt.objects(fsys.Context(), query)
 	for {
-		attrs, err := it.Next()
+		attrs, err := it.nextAttrs()
 		if err == iterator.Done {
 			break
 		}
@@ -307,8 +328,8 @@ func (fsys *GCSFS) RemoveAll(dir string) error {
 			return toPathError(err, "RemoveAll", dir)
 		}
 		name := path.Join(attrs.Prefix, attrs.Name)
-		obj := client.Bucket(fsys.bucket).Object(name)
-		if err := obj.Delete(ctx); err != nil {
+		obj := bkt.object(name)
+		if err := obj.delete(ctx); err != nil {
 			return toPathError(err, "RemoveAll", name)
 		}
 	}
