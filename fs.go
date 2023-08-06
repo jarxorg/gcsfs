@@ -44,19 +44,22 @@ func New(bucket string) *GCSFS {
 // NewWithClient returns a filesystem for the tree of objects rooted at the specified bucket with *storage.Client.
 // The specified client will be closed by Close.
 //
-//   ctx := context.Background()
-//   client, err := storage.NewClient(ctx)
-//   if err != nil {
-//     log.Fatal(err)
-//   }
-//   fsys := gcsfs.NewWithClient("<your-bucket>", client).WithContext(ctx)
-//   defer fsys.Close() // Close closes the specified client.
+//	ctx := context.Background()
+//	client, err := storage.NewClient(ctx)
+//	if err != nil {
+//	  log.Fatal(err)
+//	}
+//	fsys := gcsfs.NewWithClient("<your-bucket>", client).WithContext(ctx)
+//	defer fsys.Close() // Close closes the specified client.
 func NewWithClient(bucket string, client *storage.Client) *GCSFS {
-	return &GCSFS{
+	fsys := &GCSFS{
 		DirOpenBufferSize: defaultDirOpenBufferSize,
 		bucket:            bucket,
-		cl:                &gcsClient{cl: client},
 	}
+	if client != nil {
+		return fsys.WithClient(client)
+	}
+	return fsys
 }
 
 // WithClient holds the specified client. The specified client is closed by Close.
