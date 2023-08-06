@@ -93,12 +93,12 @@ func (d *gcsDir) list(n int) ([]fs.DirEntry, error) {
 		return nil, io.EOF
 	}
 
-	cl, err := d.fsys.client()
+	c, err := d.fsys.client()
 	if err != nil {
 		return nil, err
 	}
 	query := newQuery("/", d.prefix, d.offset)
-	it := cl.bucket(d.fsys.bucket).objects(d.fsys.Context(), query)
+	it := c.bucket(d.fsys.bucket).objects(d.fsys.Context(), query)
 	for {
 		attrs, err := it.nextAttrs()
 		if err == iterator.Done {

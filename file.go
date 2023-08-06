@@ -12,7 +12,7 @@ import (
 type gcsFile struct {
 	*content
 	fsys  *GCSFS
-	obj   object
+	obj   gcsObject
 	attrs *storage.ObjectAttrs
 	in    io.ReadCloser
 }
@@ -22,7 +22,7 @@ var (
 	_ fs.FileInfo = (*gcsFile)(nil)
 )
 
-func newGcsFile(fsys *GCSFS, obj object, attrs *storage.ObjectAttrs) *gcsFile {
+func newGcsFile(fsys *GCSFS, obj gcsObject, attrs *storage.ObjectAttrs) *gcsFile {
 	return &gcsFile{
 		content: newFileContent(attrs),
 		fsys:    fsys,
@@ -62,7 +62,7 @@ type gcsWriterFile struct {
 	*content
 	fsys *GCSFS
 	name string
-	obj  object
+	obj  gcsObject
 	out  io.WriteCloser
 }
 
@@ -71,7 +71,7 @@ var (
 	_ fs.FileInfo    = (*gcsWriterFile)(nil)
 )
 
-func newGcsWriterFile(fsys *GCSFS, obj object, name string) *gcsWriterFile {
+func newGcsWriterFile(fsys *GCSFS, obj gcsObject, name string) *gcsWriterFile {
 	return &gcsWriterFile{
 		content: &content{
 			name: path.Base(name),
