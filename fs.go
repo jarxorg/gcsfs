@@ -197,7 +197,7 @@ func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
 		return nil, err
 	}
 
-	query := newQuery(normalizePrefix(fsys.dir), "", "")
+	query := newQuery("/", normalizePrefix(fsys.dir), "")
 	it := c.bucket(fsys.bucket).objects(fsys.Context(), query)
 
 	var names []string
@@ -318,7 +318,7 @@ func (fsys *GCSFS) RemoveAll(dir string) error {
 
 	b := c.bucket(fsys.bucket)
 	ctx := fsys.Context()
-	query := newQuery(normalizePrefix(fsys.key(dir)), "", "")
+	query := newQuery("", normalizePrefix(fsys.key(dir)), "")
 	it := b.objects(fsys.Context(), query)
 	for {
 		attrs, err := it.nextAttrs()
