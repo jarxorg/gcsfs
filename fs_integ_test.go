@@ -1,3 +1,4 @@
+//go:build integtest
 // +build integtest
 
 package gcsfs
@@ -6,6 +7,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -26,7 +28,7 @@ func TestFSIntegration(t *testing.T) {
 		log.Fatal(err)
 	}
 	fsys := New(bucket).WithClient(client).WithContext(ctx)
-	if err := fstest.TestFS(fsys, expected); err != nil {
+	if err := fstest.TestFS(fsys, strings.Split(expected, ",")...); err != nil {
 		t.Errorf("Error testing/fstest: %+v", err)
 	}
 }

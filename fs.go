@@ -192,27 +192,36 @@ func (fsys *GCSFS) Sub(dir string) (fs.FS, error) {
 // Glob returns the names of all files matching pattern, providing an implementation
 // of the top-level Glob function.
 func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
+	if _, err := path.Match(pattern, ""); err != nil {
+		return nil, err
+	}
 	c, err := fsys.client()
 	if err != nil {
 		return nil, err
 	}
 
-	query := newQuery("/", normalizePrefix(fsys.dir), "")
+	query := newQuery("", normalizePrefixPattern(fsys.dir, pattern), "")
 	it := c.bucket(fsys.bucket).objects(fsys.Context(), query)
 
 	var names []string
-	matchAppend := func(name string) error {
+	contains := func(name string) bool {
+		for _, n := range names {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+	appendIfMatch := func(name string) error {
 		ok, err := path.Match(pattern, name)
 		if err != nil {
 			return toPathError(err, "Glob", pattern)
 		}
-		if ok {
+		if ok && !contains(name) {
 			names = append(names, name)
 		}
 		return nil
 	}
-
-	lastDir := ""
 	for {
 		attrs, err := it.nextAttrs()
 		if err == iterator.Done {
@@ -226,13 +235,12 @@ func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
 			name = strings.TrimSuffix(attrs.Prefix, "/")
 		}
 		name = fsys.rel(name)
-		if dir := path.Dir(name); dir != lastDir {
-			if err := matchAppend(dir); err != nil {
+		if dir := path.Dir(name); dir != "." {
+			if err := appendIfMatch(dir); err != nil {
 				return nil, err
 			}
-			lastDir = dir
 		}
-		if err := matchAppend(name); err != nil {
+		if err := appendIfMatch(name); err != nil {
 			return nil, err
 		}
 	}
