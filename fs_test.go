@@ -2,9 +2,14 @@ package gcsfs
 
 import (
 	"context"
+	"errors"
 	"io"
 	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 
@@ -115,13 +120,43 @@ func (o *fsObjects) initAttrs() error {
 	return o.walkDir()
 }
 
+func (o *fsObjects) namePrefixes() (string, string, error) {
+	namePrefix := ""
+	prefix := o.query.Prefix
+	dirWithPrefix := path.Join(o.dir, prefix)
+	info, err := fs.Stat(o.fsys, dirWithPrefix)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", "", err
+		}
+		if dirSlash := strings.LastIndex(prefix, "/"); dirSlash != -1 {
+			namePrefix = prefix[dirSlash+1:]
+			prefix = prefix[:dirSlash]
+		} else {
+			namePrefix = prefix
+			prefix = ""
+		}
+	} else if !info.IsDir() {
+		return "", "", &fs.PathError{Op: "readDir", Path: dirWithPrefix, Err: syscall.ENOTDIR}
+	}
+	return prefix, namePrefix, nil
+}
+
 func (o *fsObjects) readDir() error {
-	ds, err := fs.ReadDir(o.fsys, path.Join(o.dir, o.query.Prefix))
+	prefix, namePrefix, err := o.namePrefixes()
+	if err != nil {
+		return err
+	}
+
+	ds, err := fs.ReadDir(o.fsys, path.Join(o.dir, prefix))
 	if err != nil {
 		return toObjectNotExistIfNoExist(err)
 	}
 	for _, d := range ds {
-		name := path.Join(o.query.Prefix, d.Name())
+		name := path.Join(prefix, d.Name())
+		if !strings.HasPrefix(name, namePrefix) {
+			continue
+		}
 		if d.IsDir() {
 			name = name + "/"
 		}
@@ -151,15 +186,24 @@ func (o *fsObjects) readDir() error {
 }
 
 func (o *fsObjects) walkDir() error {
-	root := path.Join(o.dir, o.query.Prefix)
+	prefix, namePrefix, err := o.namePrefixes()
+	if err != nil {
+		return err
+	}
 
-	return fs.WalkDir(o.fsys, root, func(dir string, d fs.DirEntry, err error) error {
+	root := path.Join(o.dir, prefix)
+	namePrefix = path.Join(root, namePrefix)
+
+	return fs.WalkDir(o.fsys, root, func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		name := path.Join(o.query.Prefix, d.Name())
-		if name == root {
+		if name == root || !strings.HasPrefix(name, namePrefix) {
 			return nil
+		}
+		name, err = filepath.Rel(o.dir, name)
+		if err != nil {
+			return err
 		}
 		if d.IsDir() {
 			name = name + "/"

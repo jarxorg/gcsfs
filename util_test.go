@@ -140,6 +140,60 @@ func TestNormalizePrefix(t *testing.T) {
 	}
 }
 
+func TestNormalizePrefixPattemr(t *testing.T) {
+	tests := []struct {
+		prefix  string
+		pattern string
+		want    string
+	}{
+		{
+			prefix: ".",
+			want:   "",
+		}, {
+			prefix: "/.",
+			want:   "",
+		}, {
+			prefix:  "dir",
+			pattern: "",
+			want:    "dir",
+		}, {
+			prefix:  "dir",
+			pattern: "*.txt",
+			want:    "dir",
+		}, {
+			prefix:  "",
+			pattern: "d*",
+			want:    "d",
+		}, {
+			prefix:  "",
+			pattern: "d?",
+			want:    "d",
+		}, {
+			prefix:  "",
+			pattern: "d[a-z]r",
+			want:    "d",
+		}, {
+			prefix:  "",
+			pattern: "d\\",
+			want:    "d",
+		}, {
+			prefix:  "dir",
+			pattern: "file*.txt",
+			want:    "dir/file",
+		}, {
+			prefix:  "dir",
+			pattern: "sub-dir/",
+			want:    "dir/sub-dir/",
+		},
+	}
+	for _, test := range tests {
+		got := normalizePrefixPattern(test.prefix, test.pattern)
+		if !reflect.DeepEqual(got, test.want) {
+			t.Errorf(`Error normalizePrefixPattern(%s, %s) returns %s; want %s`, test.prefix, test.pattern, got, test.want)
+		}
+	}
+}
+
 func TestNewQuery(t *testing.T) {
 	want := &storage.Query{
 		Delimiter:   "/",

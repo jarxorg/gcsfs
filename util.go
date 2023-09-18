@@ -44,12 +44,29 @@ func toObjectNotExistIfNoExist(err error) error {
 func normalizePrefix(prefix string) string {
 	prefix = path.Clean(prefix)
 	if prefix == "." || prefix == "/" {
-		prefix = ""
+		return ""
 	}
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix = prefix + "/"
 	}
 	return prefix
+}
+
+func normalizePrefixPattern(prefix, pattern string) string {
+	prefix = normalizePrefix(prefix)
+LOOP:
+	for i, c := range pattern {
+		switch c {
+		case '*', '?', '[', '\\':
+			pattern = pattern[:i]
+			break LOOP
+		}
+	}
+	joined := path.Join(prefix, pattern)
+	if strings.HasSuffix(pattern, "/") {
+		return joined + "/"
+	}
+	return joined
 }
 
 func newQuery(delim, prefix, offset string) *storage.Query {
