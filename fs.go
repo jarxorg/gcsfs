@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -156,8 +157,7 @@ func (fsys *GCSFS) ReadDir(dir string) ([]fs.DirEntry, error) {
 	if !fs.ValidPath(dir) {
 		return nil, toPathError(fs.ErrInvalid, "ReadDir", dir)
 	}
-	entries, err := newGcsDir(fsys, dir).ReadDir(-1)
-	return entries, err
+	return newGcsDir(fsys, dir).ReadDir(-1)
 }
 
 // ReadFile reads the named file and returns its contents.
@@ -192,36 +192,63 @@ func (fsys *GCSFS) Sub(dir string) (fs.FS, error) {
 // Glob returns the names of all files matching pattern, providing an implementation
 // of the top-level Glob function.
 func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
+	if pattern == "" || pattern == "*" {
+		entries, err := fsys.ReadDir("")
+		if err != nil {
+			return nil, err
+		}
+		var names []string
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		return names, nil
+	}
+	// NOTE: Validate pattern
 	if _, err := path.Match(pattern, ""); err != nil {
 		return nil, err
 	}
+	names, err := fsys.glob([]string{""}, strings.Split(pattern, "/"), nil)
+	if err != nil {
+		return nil, err
+	}
+	var matches []string
+	for _, name := range names {
+		matches = appendIfMatch(matches, name, pattern)
+	}
+	sort.Strings(matches)
+	return matches, nil
+}
+
+func (fsys *GCSFS) glob(dirs, patterns []string, matches []string) ([]string, error) {
+	dirOnly := len(patterns) > 1
+	var subDirs []string
+	for _, dir := range dirs {
+		keys, err := fsys.listForGlob(path.Join(dir, patterns[0]), dirOnly)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range keys {
+			if dirOnly {
+				subDirs = append(subDirs, key)
+			}
+			matches = append(matches, key)
+		}
+	}
+	if len(subDirs) > 0 && dirOnly {
+		return fsys.glob(subDirs, patterns[1:], matches)
+	}
+	return matches, nil
+}
+
+func (fsys *GCSFS) listForGlob(pattern string, dirOnly bool) ([]string, error) {
 	c, err := fsys.client()
 	if err != nil {
 		return nil, err
 	}
-
-	query := newQuery("", normalizePrefixPattern(fsys.dir, pattern), "")
+	query := newQuery("/", normalizePrefixPattern(fsys.dir, pattern), "")
 	it := c.bucket(fsys.bucket).objects(fsys.Context(), query)
 
 	var names []string
-	contains := func(name string) bool {
-		for _, n := range names {
-			if n == name {
-				return true
-			}
-		}
-		return false
-	}
-	appendIfMatch := func(name string) error {
-		ok, err := path.Match(pattern, name)
-		if err != nil {
-			return toPathError(err, "Glob", pattern)
-		}
-		if ok && !contains(name) {
-			names = append(names, name)
-		}
-		return nil
-	}
 	for {
 		attrs, err := it.nextAttrs()
 		if err == iterator.Done {
@@ -230,19 +257,16 @@ func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
 		if err != nil {
 			return nil, toPathError(err, "Glob", pattern)
 		}
-		name := attrs.Name
-		if name == "" {
-			name = strings.TrimSuffix(attrs.Prefix, "/")
+		if attrs.Name == "" {
+			name := fsys.rel(strings.TrimSuffix(attrs.Prefix, "/"))
+			names = appendIfMatch(names, name, pattern)
+			continue
 		}
-		name = fsys.rel(name)
-		if dir := path.Dir(name); dir != "." {
-			if err := appendIfMatch(dir); err != nil {
-				return nil, err
-			}
+		if dirOnly {
+			continue
 		}
-		if err := appendIfMatch(name); err != nil {
-			return nil, err
-		}
+		name := fsys.rel(attrs.Name)
+		names = appendIfMatch(names, name, pattern)
 	}
 	return names, nil
 }

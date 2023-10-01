@@ -155,11 +155,11 @@ func TestNormalizePrefixPattemr(t *testing.T) {
 		}, {
 			prefix:  "dir",
 			pattern: "",
-			want:    "dir",
+			want:    "dir/",
 		}, {
 			prefix:  "dir",
 			pattern: "*.txt",
-			want:    "dir",
+			want:    "dir/",
 		}, {
 			prefix:  "",
 			pattern: "d*",
@@ -196,14 +196,39 @@ func TestNormalizePrefixPattemr(t *testing.T) {
 
 func TestNewQuery(t *testing.T) {
 	want := &storage.Query{
-		Delimiter:   "/",
-		Prefix:      "prefix",
-		StartOffset: "offset",
+		Delimiter:                "/",
+		Prefix:                   "prefix",
+		StartOffset:              "offset",
+		IncludeTrailingDelimiter: true,
 	}
 	want.SetAttrSelection([]string{"Prefix", "Name", "Size", "Updated"})
 
 	got := newQuery(want.Delimiter, want.Prefix, want.StartOffset)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(`Error newQuery returns %v; want %v`, want, got)
+	}
+}
+
+func TestContains(t *testing.T) {
+	tests := []struct {
+		keys []string
+		key  string
+		want bool
+	}{
+		{
+			keys: []string{"abc", "def", "ghi"},
+			key:  "def",
+			want: true,
+		}, {
+			keys: []string{"abc", "def", "ghi"},
+			key:  "xyz",
+			want: false,
+		},
+	}
+	for _, test := range tests {
+		got := contains(test.keys, test.key)
+		if got != test.want {
+			t.Errorf(`Error contains(%v, %v) returns %v; want %v`, test.keys, test.key, got, test.want)
+		}
 	}
 }

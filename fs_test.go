@@ -158,6 +158,9 @@ func (o *fsObjects) readDir() error {
 			continue
 		}
 		if d.IsDir() {
+			if !o.query.IncludeTrailingDelimiter {
+				continue
+			}
 			name = name + "/"
 		}
 		if o.query.StartOffset != "" && o.query.StartOffset > name {
@@ -206,6 +209,9 @@ func (o *fsObjects) walkDir() error {
 			return err
 		}
 		if d.IsDir() {
+			if !o.query.IncludeTrailingDelimiter {
+				return nil
+			}
 			name = name + "/"
 		}
 		if o.query.StartOffset != "" && o.query.StartOffset > name {
