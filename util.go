@@ -63,7 +63,7 @@ LOOP:
 		}
 	}
 	joined := path.Join(prefix, pattern)
-	if strings.HasSuffix(pattern, "/") {
+	if strings.HasSuffix(pattern, "/") || (joined != "" && pattern == "") {
 		return joined + "/"
 	}
 	return joined
@@ -71,10 +71,27 @@ LOOP:
 
 func newQuery(delim, prefix, offset string) *storage.Query {
 	query := &storage.Query{
-		Delimiter:   delim,
-		Prefix:      prefix,
-		StartOffset: offset,
+		Delimiter:                delim,
+		Prefix:                   prefix,
+		StartOffset:              offset,
+		IncludeTrailingDelimiter: delim == "/",
 	}
 	query.SetAttrSelection([]string{"Prefix", "Name", "Size", "Updated"})
 	return query
+}
+
+func contains(keys []string, key string) bool {
+	for _, k := range keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+func appendIfMatch(keys []string, key, pattern string) []string {
+	if ok, _ := path.Match(pattern, key); ok && !contains(keys, key) {
+		keys = append(keys, key)
+	}
+	return keys
 }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -156,8 +157,7 @@ func (fsys *GCSFS) ReadDir(dir string) ([]fs.DirEntry, error) {
 	if !fs.ValidPath(dir) {
 		return nil, toPathError(fs.ErrInvalid, "ReadDir", dir)
 	}
-	entries, err := newGcsDir(fsys, dir).ReadDir(-1)
-	return entries, err
+	return newGcsDir(fsys, dir).ReadDir(-1)
 }
 
 // ReadFile reads the named file and returns its contents.
@@ -192,6 +192,18 @@ func (fsys *GCSFS) Sub(dir string) (fs.FS, error) {
 // Glob returns the names of all files matching pattern, providing an implementation
 // of the top-level Glob function.
 func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
+	if pattern == "" || pattern == "*" {
+		entries, err := fsys.ReadDir("")
+		if err != nil {
+			return nil, err
+		}
+		var names []string
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		return names, nil
+	}
+	// NOTE: Validate pattern
 	if _, err := path.Match(pattern, ""); err != nil {
 		return nil, err
 	}
@@ -204,24 +216,7 @@ func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
 	it := c.bucket(fsys.bucket).objects(fsys.Context(), query)
 
 	var names []string
-	contains := func(name string) bool {
-		for _, n := range names {
-			if n == name {
-				return true
-			}
-		}
-		return false
-	}
-	appendIfMatch := func(name string) error {
-		ok, err := path.Match(pattern, name)
-		if err != nil {
-			return toPathError(err, "Glob", pattern)
-		}
-		if ok && !contains(name) {
-			names = append(names, name)
-		}
-		return nil
-	}
+	var lastDir string
 	for {
 		attrs, err := it.nextAttrs()
 		if err == iterator.Done {
@@ -235,15 +230,16 @@ func (fsys *GCSFS) Glob(pattern string) ([]string, error) {
 			name = strings.TrimSuffix(attrs.Prefix, "/")
 		}
 		name = fsys.rel(name)
-		if dir := path.Dir(name); dir != "." {
-			if err := appendIfMatch(dir); err != nil {
-				return nil, err
+		if dir := path.Dir(name); dir != lastDir {
+			lastDir = dir
+			for dir != "." {
+				names = appendIfMatch(names, dir, pattern)
+				dir = path.Dir(dir)
 			}
 		}
-		if err := appendIfMatch(name); err != nil {
-			return nil, err
-		}
+		names = appendIfMatch(names, name, pattern)
 	}
+	sort.Strings(names)
 	return names, nil
 }
 
